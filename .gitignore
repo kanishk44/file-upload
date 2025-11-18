@@ -9,21 +9,33 @@ package-lock.json
 logs/
 *.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # OS files
 .DS_Store
 Thumbs.db
+.AppleDouble
+.LSOverride
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# Test files
-test-data/large-file.txt
-test-data/*.generated.*
+*~
 
 # PM2
 .pm2/
+pids/
+*.pid
+*.seed
+*.pid.lock
 
+# Build
+dist/
+build/
+
+# Temporary files
+tmp/
+temp/

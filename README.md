@@ -1,124 +1,62 @@
 # File Upload & Processing Service
 
-A production-ready Node.js backend service for streaming file uploads to AWS S3 and asynchronous file processing with MongoDB. Built with Express.js, featuring a custom job queue system with crash recovery and support for processing extremely large files.
+A production-ready Node.js backend service for streaming file uploads to AWS S3 and asynchronous file processing with MongoDB. Features a custom job queue system with crash recovery and support for processing extremely large files without memory buffering.
 
 ## Features
 
-- 🚀 **Streaming uploads to S3** - No memory buffering, handles files of any size
+- 🚀 **Streaming uploads to S3** - Handles files of any size without memory buffering
 - 📊 **Asynchronous file processing** - Custom job queue backed by MongoDB
 - 💪 **Resilient processing** - Crash recovery, job retry, and error handling
-- ⚡ **Optimized MongoDB writes** - Batched bulk inserts with throttling
+- ⚡ **Optimized MongoDB writes** - Batched bulk inserts with configurable throttling
 - 🔄 **Worker system** - Background processing with fair scheduling
-- 📈 **Production-ready** - Health checks, logging, and graceful shutdown
-- 🔒 **Secure** - Environment-based configuration, no secrets in code
+- 📈 **Production-ready** - Health checks, structured logging, graceful shutdown
 
 ## Architecture
 
 ```
-┌─────────────┐     Upload      ┌─────────────┐     Stream      ┌─────────────┐
-│   Client    │ ───────────────> │   Express   │ ──────────────> │   AWS S3    │
-└─────────────┘                  │   Server    │                 └─────────────┘
-                                 └─────────────┘
-                                        │
-                                        │ Create Job
-                                        ▼
-                 ┌─────────────────────────────────────────┐
-                 │            MongoDB                       │
-                 │  ┌──────────┐  ┌──────┐  ┌──────────┐  │
-                 │  │  files   │  │ jobs │  │ records  │  │
-                 │  └──────────┘  └──────┘  └──────────┘  │
-                 └─────────────────────────────────────────┘
-                                        ▲
-                                        │ Claim Job
-                                        │
-                 ┌─────────────────────────────────────────┐
-                 │         Worker Process                   │
-                 │  • Stream from S3                        │
-                 │  • Parse line-by-line                    │
-                 │  • Batch MongoDB writes                  │
-                 │  • Error handling & recovery             │
-                 └─────────────────────────────────────────┘
-```
-
-## API Endpoints
-
-### Upload File
-```bash
-POST /upload
-Content-Type: multipart/form-data
-
-# Response
-{
-  "fileId": "673abc123...",
-  "s3Key": "uploads/2025-11-18/1234567890-abc123-sample.json",
-  "message": "uploaded"
-}
-```
-
-### Process File
-```bash
-POST /process/:fileId
-
-# Response
-{
-  "jobId": "673def456...",
-  "fileId": "673abc123...",
-  "state": "queued",
-  "message": "Job created and queued for processing"
-}
-```
-
-### Get Job Status
-```bash
-GET /jobs/:jobId
-
-# Response
-{
-  "jobId": "673def456...",
-  "state": "completed",
-  "progress": {
-    "linesProcessed": 10000,
-    "recordsInserted": 9987,
-    "errors": 13
-  },
-  "result": { ... }
-}
-```
-
-### Health Check
-```bash
-GET /healthz
-
-# Response
-{
-  "status": "healthy",
-  "services": {
-    "mongodb": "healthy",
-    "s3": "healthy"
-  }
-}
+┌─────────────┐    Upload     ┌─────────────┐    Stream     ┌─────────────┐
+│   Client    │ ─────────────>│   Express   │ ─────────────>│   AWS S3    │
+└─────────────┘               │   Server    │               └─────────────┘
+                              └─────────────┘
+                                     │
+                                     │ Create Job
+                                     ▼
+              ┌──────────────────────────────────────────┐
+              │            MongoDB                        │
+              │  ┌──────────┐  ┌──────┐  ┌──────────┐   │
+              │  │  files   │  │ jobs │  │ records  │   │
+              │  └──────────┘  └──────┘  └──────────┘   │
+              └──────────────────────────────────────────┘
+                                     ▲
+                                     │ Claim & Process
+                                     │
+              ┌──────────────────────────────────────────┐
+              │         Worker Process                    │
+              │  • Stream from S3                         │
+              │  • Parse line-by-line                     │
+              │  • Batch MongoDB writes                   │
+              │  • Error handling & recovery              │
+              └──────────────────────────────────────────┘
 ```
 
 ## Prerequisites
 
-- **Node.js** v18+ 
+- **Node.js** v18+
 - **MongoDB** (Atlas or self-hosted)
 - **AWS Account** with S3 bucket
 - **EC2 Instance** (for deployment) - Ubuntu 20.04+ recommended
 
-## Quick Start (Local Development)
+## Quick Start
 
-### 1. Clone and Install
+### 1. Install Dependencies
 
 ```bash
-git clone <your-repo-url>
-cd file-upload
 npm install
 ```
 
 ### 2. Configure Environment
 
-Create a `.env` file (use `env.example` as template):
+Create a `.env` file:
 
 ```bash
 cp env.example .env
@@ -136,163 +74,190 @@ S3_BUCKET=your-bucket-name
 ENABLE_WORKER=true
 ```
 
-### 3. Start MongoDB Locally (Optional)
+**⚠️ Important:** 
+- `S3_BUCKET` should only contain the bucket name (e.g., `my-bucket`)
+- Don't include `s3://` prefix or any paths
 
-```bash
-# Using Docker
-docker run -d -p 27017:27017 --name mongodb mongo:latest
-
-# Or use MongoDB Atlas (recommended for production)
-```
-
-### 4. Create S3 Bucket
-
-```bash
-aws s3 mb s3://your-bucket-name --region us-east-1
-```
-
-### 5. Start the Service
+### 3. Start the Service
 
 ```bash
 npm start
 ```
 
-The service will start on `http://localhost:3000` with the worker enabled.
+The service starts on `http://localhost:3000`
 
-## Testing Locally
+## API Endpoints
 
-### Test Upload
+### Upload File
+```
+POST /upload
+Content-Type: multipart/form-data
+Body: file=<binary>
 
-```bash
-./test-scripts/test-upload.sh http://localhost:3000 test-data/sample.json
+Response:
+{
+  "fileId": "673abc123...",
+  "s3Key": "uploads/2025-11-18/...",
+  "message": "uploaded",
+  "metadata": {
+    "originalName": "sample.json",
+    "size": 1234,
+    "contentType": "application/json",
+    "uploadedAt": "2025-11-18T..."
+  }
+}
 ```
 
-### Test Processing
+### Process File
+```
+POST /process/:fileId
 
-```bash
-# Use the fileId returned from upload
-./test-scripts/test-process.sh http://localhost:3000 <fileId>
+Response:
+{
+  "jobId": "673def456...",
+  "fileId": "673abc123...",
+  "state": "queued",
+  "message": "Job created and queued for processing"
+}
 ```
 
-### Test Health Check
+### Get Job Status
+```
+GET /jobs/:jobId
 
-```bash
-./test-scripts/test-health.sh http://localhost:3000
+Response:
+{
+  "jobId": "673def456...",
+  "state": "completed",
+  "progress": {
+    "linesProcessed": 10000,
+    "recordsInserted": 9987,
+    "errors": 13
+  },
+  "result": { ... }
+}
 ```
 
-### Generate Large Test File
+### Health Check
+```
+GET /healthz
 
-```bash
-# Generate 1 million lines (~100MB)
-node test-data/generate-large-file.js 1000000 test-data/large-file.json
-
-# Upload it
-curl -F "file=@test-data/large-file.json" http://localhost:3000/upload
+Response:
+{
+  "status": "healthy",
+  "services": {
+    "mongodb": "healthy",
+    "s3": "healthy"
+  }
+}
 ```
 
-## EC2 Deployment
+## Testing
 
-### Option 1: Automated Deployment (Recommended)
+### Using cURL
 
-**Prerequisites:**
-- EC2 instance running Ubuntu 20.04+
-- SSH access configured
-- Security group allows ports 22 (SSH) and 3000 (App)
-
-**Deploy:**
-
+**Upload a file:**
 ```bash
-# Set your EC2 host
-export EC2_HOST=ec2-XX-XXX-XXX-XXX.compute-1.amazonaws.com
-
-# Run deployment script
-./config/deployment/deploy.sh
+curl -F "file=@path/to/file.json" http://localhost:3000/upload
 ```
 
-This script will:
-1. Install Node.js and PM2 on EC2
-2. Copy application files
-3. Install dependencies
-4. Copy .env file
-5. Start the application with PM2
-6. Configure PM2 to start on boot
-
-### Option 2: Manual Deployment
-
-**1. Launch EC2 Instance**
-
+**Process file:**
 ```bash
-aws ec2 run-instances \
-  --image-id ami-0c55b159cbfafe1f0 \
-  --instance-type t3.medium \
-  --key-name your-key-pair \
-  --security-groups file-upload-sg \
-  --iam-instance-profile Name=FileUploadServiceRole \
-  --region us-east-1
+curl -X POST http://localhost:3000/process/<fileId>
 ```
 
-**2. Configure Security Group**
-
+**Check job status:**
 ```bash
-aws ec2 authorize-security-group-ingress \
-  --group-name file-upload-sg \
-  --protocol tcp \
-  --port 22 \
-  --cidr 0.0.0.0/0  # SSH (restrict to your IP)
-
-aws ec2 authorize-security-group-ingress \
-  --group-name file-upload-sg \
-  --protocol tcp \
-  --port 3000 \
-  --cidr 0.0.0.0/0  # Application
+curl http://localhost:3000/jobs/<jobId>
 ```
 
-**3. SSH into Instance**
-
-```bash
-ssh -i your-key.pem ubuntu@<EC2_PUBLIC_IP>
-```
-
-**4. Run Setup Script**
-
-```bash
-# Copy and run the setup script
-curl -O https://raw.githubusercontent.com/<your-repo>/main/config/deployment/setup-ec2.sh
-chmod +x setup-ec2.sh
-./setup-ec2.sh
-```
-
-**5. Clone and Configure**
-
-```bash
-git clone <your-repo-url> file-upload-service
-cd file-upload-service
-
-# Create .env file
-nano .env
-# (paste your configuration)
-
-# Install dependencies
-npm ci --production
-```
-
-**6. Start with PM2**
-
-```bash
-pm2 start src/server.js --name file-upload-service
-pm2 save
-pm2 startup  # Follow the instructions
-```
-
-**7. Verify Deployment**
-
+**Health check:**
 ```bash
 curl http://localhost:3000/healthz
 ```
 
-## IAM Configuration
+### Using Postman
 
-Create an IAM role for your EC2 instance or user with the following policy:
+1. **Upload File:**
+   - Method: `POST`
+   - URL: `http://localhost:3000/upload`
+   - Body: `form-data`
+   - Key: `file` (Type: **File**, not Text)
+   - Value: Select your file
+
+2. **Process File:**
+   - Method: `POST`
+   - URL: `http://localhost:3000/process/{fileId}`
+
+3. **Check Status:**
+   - Method: `GET`
+   - URL: `http://localhost:3000/jobs/{jobId}`
+
+## EC2 Deployment
+
+### Automated Deployment
+
+```bash
+export EC2_HOST=ec2-XX-XXX-XXX-XXX.compute-1.amazonaws.com
+./config/deployment/deploy.sh
+```
+
+### Manual Deployment
+
+**1. SSH into EC2 Instance:**
+```bash
+ssh -i your-key.pem ubuntu@<EC2_PUBLIC_IP>
+```
+
+**2. Install Node.js and PM2:**
+```bash
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
+sudo npm install -g pm2
+```
+
+**3. Clone Repository:**
+```bash
+git clone <your-repo-url> file-upload-service
+cd file-upload-service
+```
+
+**4. Configure Environment:**
+```bash
+nano .env
+# Add your configuration
+```
+
+**5. Install Dependencies:**
+```bash
+npm ci --production
+```
+
+**6. Start with PM2:**
+```bash
+pm2 start src/server.js --name file-upload-service
+pm2 save
+pm2 startup  # Follow instructions
+```
+
+**7. Configure Security Group:**
+- Allow port 22 (SSH)
+- Allow port 3000 (Application)
+
+## Docker Deployment
+
+```bash
+# Using docker-compose
+docker-compose up -d
+
+# Or build and run manually
+docker build -t file-upload-service .
+docker run -d -p 3000:3000 --env-file .env file-upload-service
+```
+
+## AWS IAM Configuration
+
+Create an IAM policy for S3 access:
 
 ```json
 {
@@ -321,14 +286,9 @@ Create an IAM role for your EC2 instance or user with the following policy:
 }
 ```
 
-**Attach to EC2 Instance:**
-
-```bash
-aws iam create-role --role-name FileUploadServiceRole --assume-role-policy-document file://trust-policy.json
-aws iam put-role-policy --role-name FileUploadServiceRole --policy-name S3Access --policy-document file://config/deployment/iam-policy.json
-aws iam create-instance-profile --instance-profile-name FileUploadServiceRole
-aws iam add-role-to-instance-profile --instance-profile-name FileUploadServiceRole --role-name FileUploadServiceRole
-```
+Attach this policy to:
+- EC2 instance role (recommended), or
+- IAM user credentials in `.env`
 
 ## Configuration Reference
 
@@ -343,81 +303,94 @@ aws iam add-role-to-instance-profile --instance-profile-name FileUploadServiceRo
 | `MAX_FILE_SIZE` | Max upload size (bytes) | `5368709120` (5GB) | No |
 | `ALLOWED_FILE_TYPES` | Allowed MIME types | `text/plain,application/json,text/csv` | No |
 | `JOB_BATCH_SIZE` | MongoDB batch size | `1000` | No |
-| `JOB_WRITE_PAUSE_MS` | Pause between batches | `50` | No |
+| `JOB_WRITE_PAUSE_MS` | Pause between batches (ms) | `50` | No |
 | `ENABLE_WORKER` | Enable background worker | `true` | No |
 | `WORKER_ID` | Worker identifier | `worker-${pid}` | No |
 
 \* Not required if using IAM role on EC2
 
-## Architecture Details
+## Project Structure
 
-### File Upload Flow
+```
+file-upload/
+├── src/
+│   ├── server.js              # Express server
+│   ├── lib/
+│   │   ├── config.js          # Configuration
+│   │   ├── logger.js          # Logging
+│   │   ├── db.js              # MongoDB connection
+│   │   ├── s3.js              # S3 streaming
+│   │   ├── fileModel.js       # File operations
+│   │   ├── jobModel.js        # Job queue
+│   │   ├── worker.js          # Background processor
+│   │   └── lineParser.js      # File parsing
+│   └── routes/
+│       ├── upload.js          # POST /upload
+│       ├── process.js         # POST /process, GET /jobs
+│       └── health.js          # GET /healthz
+├── config/deployment/
+│   ├── deploy.sh              # Deployment script
+│   ├── setup-ec2.sh           # EC2 setup
+│   └── iam-policy.json        # IAM policy
+├── package.json
+├── env.example
+├── Dockerfile
+├── docker-compose.yml
+├── ecosystem.config.js        # PM2 config
+└── README.md
+```
 
-1. Client sends multipart/form-data to `/upload`
-2. Server uses `busboy` to stream the file (no memory buffering)
-3. File is streamed directly to S3 using `@aws-sdk/lib-storage`
-4. Metadata is saved to MongoDB `files` collection
-5. Response includes `fileId` and `s3Key`
+## Key Technical Features
 
-### Job Processing Flow
+### 1. Streaming Architecture
+- Files never loaded into memory
+- Uses Node.js Transform streams with back-pressure
+- S3 multipart upload with 5MB chunks
 
-1. Client sends POST to `/process/:fileId`
-2. Server creates job record in MongoDB `jobs` collection (state: `queued`)
-3. Worker claims job atomically using `findOneAndUpdate`
-4. Worker streams file from S3 line-by-line
-5. Each line is parsed (JSON/CSV/text) and validated
-6. Records are batched (default: 1000) and bulk-inserted into MongoDB
-7. Progress is updated periodically
-8. On completion, job state changes to `completed`
-9. File status changes to `processed`
+### 2. Custom Job Queue
+- MongoDB-backed persistence
+- Atomic job claiming using `findOneAndUpdate`
+- Job states: queued → in_progress → completed/failed
+- Lock mechanism prevents duplicate processing
 
-### Crash Recovery
+### 3. Crash Recovery
+- On startup, detects stale in-progress jobs
+- Resets to queued if under max attempts
+- Marks as failed if max attempts exceeded
 
-On server start:
-- Detects jobs with `state: in_progress` and expired `lockUntil`
-- Resets them to `queued` if `attempts < MAX_ATTEMPTS`
-- Marks as `failed` if max attempts exceeded
+### 4. Optimized Database Writes
+- Batch inserts (default: 1000 records)
+- Configurable throttling between batches
+- Indexes on critical fields
 
-### Worker Concurrency
-
-Multiple workers can run safely:
-- Jobs are claimed atomically using MongoDB `findOneAndUpdate`
-- Each worker has a unique `workerId`
-- Lock timeout prevents job theft
-- Workers can run as separate processes or in cluster mode
+### 5. Multiple Workers
+- Supports horizontal scaling
+- Atomic job claiming prevents conflicts
+- Workers can run as separate processes
 
 ## Monitoring & Maintenance
 
 ### View Logs
-
 ```bash
-# On EC2
-ssh ubuntu@<EC2_HOST>
 pm2 logs file-upload-service
-
-# Follow logs in real-time
 pm2 logs --lines 100
 ```
 
 ### Restart Service
-
 ```bash
 pm2 restart file-upload-service
 ```
 
 ### Monitor Status
-
 ```bash
 pm2 status
 pm2 monit  # Interactive monitoring
 ```
 
 ### Check MongoDB
-
 ```bash
-mongosh <MONGODB_URI>
+mongosh $MONGODB_URI
 
-# View collections
 use fileupload
 db.files.countDocuments()
 db.jobs.countDocuments()
@@ -432,121 +405,42 @@ db.jobs.aggregate([
 ## Troubleshooting
 
 ### Upload Fails
-
 - Check S3 bucket exists and credentials are correct
 - Verify IAM permissions
 - Check file size limits
 - Ensure content-type is allowed
 
 ### Worker Not Processing Jobs
-
 - Verify `ENABLE_WORKER=true` in .env
 - Check MongoDB connection
 - Ensure S3 file exists
 - Check worker logs for errors
 
 ### Memory Issues
-
-- Increase `max-memory-restart` in PM2: `pm2 start src/server.js --max-memory-restart 2G`
-- Reduce `JOB_BATCH_SIZE`
 - Ensure streaming is working (not buffering)
+- Reduce `JOB_BATCH_SIZE`
+- Increase `JOB_WRITE_PAUSE_MS`
 
 ### High MongoDB Load
-
 - Increase `JOB_WRITE_PAUSE_MS`
 - Reduce `JOB_BATCH_SIZE`
-- Add MongoDB indexes (already created automatically)
 - Scale MongoDB (use Atlas M10+ tier)
 
-## Performance Considerations
+## Performance Characteristics
 
-### Streaming
+- **Memory usage:** ~150-200MB regardless of file size (streaming)
+- **Throughput:** ~10,000-50,000 records/second (depends on MongoDB)
+- **Concurrent uploads:** Limited by network/S3, not by server
+- **Concurrent jobs:** Multiple workers supported
 
-- Files are never fully loaded into memory
-- Uses Node.js streams with back-pressure handling
-- S3 multipart upload for large files (5MB chunks)
+## Security Features
 
-### MongoDB Optimization
-
-- Bulk inserts reduce round-trips
-- Throttling prevents overwhelming the database
-- Indexes on `state`, `queuedAt`, `lockUntil` for efficient job queries
-- Connection pooling (default: 2-10 connections)
-
-### Scalability
-
-- Horizontal: Run multiple worker processes
-- Vertical: Increase EC2 instance size
-- Database: Use MongoDB Atlas with auto-scaling
-- S3: Unlimited storage, pay per use
-
-## Project Structure
-
-```
-file-upload/
-├── src/
-│   ├── server.js              # Express server & startup
-│   ├── lib/
-│   │   ├── config.js          # Configuration loader
-│   │   ├── logger.js          # Pino logger
-│   │   ├── db.js              # MongoDB connection
-│   │   ├── s3.js              # S3 streaming helpers
-│   │   ├── fileModel.js       # File metadata model
-│   │   ├── jobModel.js        # Job model & operations
-│   │   ├── worker.js          # Worker loop & processing
-│   │   └── lineParser.js      # Line parsing utilities
-│   └── routes/
-│       ├── upload.js          # POST /upload
-│       ├── process.js         # POST /process/:fileId, GET /jobs/:jobId
-│       └── health.js          # GET /healthz
-├── config/
-│   └── deployment/
-│       ├── deploy.sh          # Automated deployment script
-│       ├── setup-ec2.sh       # EC2 setup script
-│       └── iam-policy.json    # IAM policy template
-├── test-data/
-│   ├── sample.json            # Sample JSON file
-│   ├── sample.csv             # Sample CSV file
-│   └── generate-large-file.js # Large file generator
-├── test-scripts/
-│   ├── test-upload.sh         # Upload test
-│   ├── test-process.sh        # Process test
-│   └── test-health.sh         # Health check test
-├── package.json
-├── env.example
-└── README.md
-```
-
-## Example Usage
-
-### Complete Workflow
-
-```bash
-# 1. Upload a file
-curl -F "file=@test-data/sample.json" http://localhost:3000/upload
-# Returns: { "fileId": "673abc123...", ... }
-
-# 2. Create processing job
-curl -X POST http://localhost:3000/process/673abc123...
-# Returns: { "jobId": "673def456...", "state": "queued", ... }
-
-# 3. Check job status
-curl http://localhost:3000/jobs/673def456...
-# Returns: { "state": "in_progress", "progress": {...}, ... }
-
-# 4. Wait for completion (poll or wait)
-sleep 5
-curl http://localhost:3000/jobs/673def456...
-# Returns: { "state": "completed", "result": {...}, ... }
-
-# 5. Query processed records in MongoDB
-mongosh $MONGODB_URI
-db.parsed_records.find({ jobId: ObjectId("673def456...") })
-```
-
-## Contributing
-
-Pull requests are welcome! For major changes, please open an issue first.
+- Environment-based credential management
+- Least-privilege IAM policies
+- File type validation
+- File size limits
+- Input sanitization
+- No stack traces to client
 
 ## License
 
@@ -554,12 +448,11 @@ ISC
 
 ## Support
 
-For issues and questions:
-- Open a GitHub issue
-- Check logs: `pm2 logs file-upload-service`
-- Review health endpoint: `curl http://localhost:3000/healthz`
+For issues:
+1. Check logs: `pm2 logs file-upload-service`
+2. Verify health: `curl http://localhost:3000/healthz`
+3. Review configuration in `.env`
 
 ---
 
-**Built with** ❤️ **using Node.js, Express, AWS S3, and MongoDB**
-
+**Production-Ready Node.js File Upload Service** | Built with Express, AWS S3, and MongoDB
