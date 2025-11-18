@@ -9,6 +9,7 @@ set -e
 APP_NAME="file-upload-service"
 EC2_USER="ubuntu"
 EC2_HOST="${EC2_HOST:-}"
+SSH_KEY="${SSH_KEY:-}"
 DEPLOY_DIR="/home/ubuntu/${APP_NAME}"
 NODE_VERSION="18"
 
@@ -33,15 +34,36 @@ log_error() {
 # Check if EC2_HOST is set
 if [ -z "$EC2_HOST" ]; then
     log_error "EC2_HOST environment variable is not set"
-    echo "Usage: EC2_HOST=your-ec2-ip.compute.amazonaws.com ./deploy.sh"
+    echo "Usage: EC2_HOST=your-ec2-ip.compute.amazonaws.com SSH_KEY=/path/to/key.pem ./deploy.sh"
     exit 1
+fi
+
+# Check if SSH_KEY is set
+if [ -z "$SSH_KEY" ]; then
+    log_error "SSH_KEY environment variable is not set"
+    echo "Usage: EC2_HOST=your-ec2-ip.compute.amazonaws.com SSH_KEY=/path/to/key.pem ./deploy.sh"
+    exit 1
+fi
+
+# Check if SSH key file exists
+if [ ! -f "$SSH_KEY" ]; then
+    log_error "SSH key file not found: $SSH_KEY"
+    exit 1
+fi
+
+# Check SSH key permissions
+KEY_PERMS=$(stat -f "%A" "$SSH_KEY" 2>/dev/null || stat -c "%a" "$SSH_KEY" 2>/dev/null)
+if [ "$KEY_PERMS" != "400" ] && [ "$KEY_PERMS" != "600" ]; then
+    log_warn "SSH key has incorrect permissions: $KEY_PERMS"
+    log_info "Fixing permissions to 400..."
+    chmod 400 "$SSH_KEY"
 fi
 
 log_info "Starting deployment to $EC2_HOST..."
 
 # Step 1: Install Node.js and dependencies on EC2
 log_info "Installing Node.js and dependencies..."
-ssh ${EC2_USER}@${EC2_HOST} << 'ENDSSH'
+ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} << 'ENDSSH'
     # Update system
     sudo apt-get update
 
@@ -70,18 +92,19 @@ log_info "Node.js and dependencies installed"
 
 # Step 2: Create deployment directory
 log_info "Creating deployment directory..."
-ssh ${EC2_USER}@${EC2_HOST} "mkdir -p ${DEPLOY_DIR}"
+ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "mkdir -p ${DEPLOY_DIR}"
 
 # Step 3: Copy application files
 log_info "Copying application files..."
-rsync -avz --exclude 'node_modules' --exclude '.git' --exclude '.env' \
+rsync -avz -e "ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no" \
+    --exclude 'node_modules' --exclude '.git' --exclude '.env' \
     ./ ${EC2_USER}@${EC2_HOST}:${DEPLOY_DIR}/
 
 log_info "Files copied"
 
 # Step 4: Install npm dependencies
 log_info "Installing npm dependencies..."
-ssh ${EC2_USER}@${EC2_HOST} << ENDSSH
+ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} << ENDSSH
     cd ${DEPLOY_DIR}
     npm ci --production
 ENDSSH
@@ -91,7 +114,7 @@ log_info "Dependencies installed"
 # Step 5: Copy .env file (if exists locally)
 if [ -f .env ]; then
     log_info "Copying .env file..."
-    scp .env ${EC2_USER}@${EC2_HOST}:${DEPLOY_DIR}/.env
+    scp -i "${SSH_KEY}" -o StrictHostKeyChecking=no .env ${EC2_USER}@${EC2_HOST}:${DEPLOY_DIR}/.env
 else
     log_warn ".env file not found locally. Please create it on the server."
     log_warn "You can use env.example as a template."
@@ -99,7 +122,7 @@ fi
 
 # Step 6: Start/restart application with PM2
 log_info "Starting application with PM2..."
-ssh ${EC2_USER}@${EC2_HOST} << ENDSSH
+ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} << ENDSSH
     cd ${DEPLOY_DIR}
     
     # Stop existing PM2 process if running
@@ -143,8 +166,8 @@ fi
 log_info "Deployment complete!"
 log_info ""
 log_info "Useful commands:"
-log_info "  View logs:    ssh ${EC2_USER}@${EC2_HOST} 'pm2 logs ${APP_NAME}'"
-log_info "  Stop app:     ssh ${EC2_USER}@${EC2_HOST} 'pm2 stop ${APP_NAME}'"
-log_info "  Restart app:  ssh ${EC2_USER}@${EC2_HOST} 'pm2 restart ${APP_NAME}'"
-log_info "  App status:   ssh ${EC2_USER}@${EC2_HOST} 'pm2 status'"
+log_info "  View logs:    ssh -i ${SSH_KEY} ${EC2_USER}@${EC2_HOST} 'pm2 logs ${APP_NAME}'"
+log_info "  Stop app:     ssh -i ${SSH_KEY} ${EC2_USER}@${EC2_HOST} 'pm2 stop ${APP_NAME}'"
+log_info "  Restart app:  ssh -i ${SSH_KEY} ${EC2_USER}@${EC2_HOST} 'pm2 restart ${APP_NAME}'"
+log_info "  App status:   ssh -i ${SSH_KEY} ${EC2_USER}@${EC2_HOST} 'pm2 status'"
 
