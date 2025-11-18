@@ -1,0 +1,36 @@
+{
+  "name": "file-upload-processor",
+  "version": "1.0.0",
+  "description": "Production-minded Node.js backend for file upload to S3 and asynchronous processing with MongoDB",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "worker": "node src/worker.js"
+  },
+  "keywords": [
+    "express",
+    "s3",
+    "mongodb",
+    "file-upload",
+    "streaming"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.670.0",
+    "@aws-sdk/lib-storage": "^3.670.0",
+    "busboy": "^1.6.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "mongodb": "^6.9.0",
+    "pino": "^9.4.0",
+    "pino-pretty": "^11.2.2",
+    "split2": "^4.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+
